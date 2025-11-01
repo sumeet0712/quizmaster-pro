@@ -3215,36 +3215,43 @@
                 themeIcon.classList.add('fa-sun');
             }
 
-            // === ASYNC APP STARTUP ===
+            // === ASYNC APP STARTUP (NOW WITH ERROR HANDLING) ===
             const sidebar = document.getElementById('sidebar');
-            const session = await AuthManager.getCurrentUserSession();
-            
-            if (session) {
-                const profile = await AuthManager.getUserProfile(session.user.id);
-                if (profile) {
-                    const fullUser = { ...session.user, ...profile };
-                    DataStorage.setCurrentUser(fullUser);
-                    
-                    sidebar.style.display = 'flex';
-                    UIManager.showPage('dashboard-page');
-                    UIManager.updateUserDisplay();
-                    
-                    if (fullUser.role === 'admin') {
-                        UIManager.renderAdminDashboard();
-                    } else if (fullUser.role === 'setter') {
-                        UIManager.renderSetterDashboard();
+            try {
+                const session = await AuthManager.getCurrentUserSession();
+                
+                if (session) {
+                    const profile = await AuthManager.getUserProfile(session.user.id);
+                    if (profile) {
+                        const fullUser = { ...session.user, ...profile };
+                        DataStorage.setCurrentUser(fullUser);
+                        
+                        sidebar.style.display = 'flex';
+                        UIManager.showPage('dashboard-page');
+                        UIManager.updateUserDisplay();
+                        
+                        if (fullUser.role === 'admin') await UIManager.renderAdminDashboard();
+                        else if (fullUser.role === 'setter') await UIManager.renderSetterDashboard();
+                        else await UIManager.renderParticipantDashboard();
                     } else {
-                        UIManager.renderParticipantDashboard();
+                        // Profile doesn't exist, log them out.
+                        await AuthManager.signOut();
+                        if(sidebar) sidebar.style.display = 'none';
+                        UIManager.showPage('login-page');
                     }
                 } else {
-                    await AuthManager.signOut();
+                    // No user logged in
                     if(sidebar) sidebar.style.display = 'none';
                     UIManager.showPage('login-page');
                 }
-            } else {
+            } catch (error) {
+                console.error("Startup Error:", error);
+                Toast.show('Error connecting to server. Check API keys.', 'error');
+                // Even if startup fails, show the login page.
                 if(sidebar) sidebar.style.display = 'none';
                 UIManager.showPage('login-page');
             }
+            // === END OF APP STARTUP ===
             
             
             // Initialize role selector
@@ -3285,7 +3292,7 @@
                 }
             });
             
-            // Login form handler
+            // === LOGIN FORM (NOW ASYNC) ===
             const loginForm = document.getElementById('login-form');
             if (loginForm) {
                 loginForm.addEventListener('submit', async function(e) {
@@ -3304,9 +3311,9 @@
                         UIManager.updateUserDisplay();
                         UIManager.showPage('dashboard-page');
                         
-                        if (result.user.role === 'admin') UIManager.renderAdminDashboard();
-                        else if (result.user.role === 'setter') UIManager.renderSetterDashboard();
-                        else UIManager.renderParticipantDashboard();
+                        if (result.user.role === 'admin') await UIManager.renderAdminDashboard();
+                        else if (result.user.role === 'setter') await UIManager.renderSetterDashboard();
+                        else await UIManager.renderParticipantDashboard();
                         
                         Toast.show('Login successful!', 'success');
                     } else {
@@ -3315,7 +3322,7 @@
                 });
             }
             
-            // Register form handler
+            // === REGISTER FORM (NOW ASYNC) ===
             const registerForm = document.getElementById('register-form');
             if (registerForm) {
                 registerForm.addEventListener('submit', async function(e) {
@@ -3332,7 +3339,7 @@
                     const result = await AuthManager.signUp(username, email, password, role);
                     
                     if (result.success) {
-                        Toast.show('Registration successful! Please check email to confirm (or login if email confirmation is off).', 'success');
+                        Toast.show('Registration successful! Please log in.', 'success');
                         registerForm.reset();
                         document.querySelectorAll('.role-option').forEach(o => o.classList.remove('selected'));
                         UIManager.showPage('login-page');
@@ -3357,14 +3364,13 @@
             // Navigation handlers
             const navDashboard = document.getElementById('nav-dashboard');
             if (navDashboard) {
-                navDashboard.addEventListener('click', (e) => { 
+                navDashboard.addEventListener('click', async (e) => { 
                     e.preventDefault(); 
                     UIManager.showPage('dashboard-page'); 
-                    // Re-render dashboard on click
                     const user = DataStorage.getCurrentUser();
-                    if (user.role === 'admin') UIManager.renderAdminDashboard();
-                    else if (user.role === 'setter') UIManager.renderSetterDashboard();
-                    else UIManager.renderParticipantDashboard();
+                    if (user.role === 'admin') await UIManager.renderAdminDashboard();
+                    else if (user.role === 'setter') await UIManager.renderSetterDashboard();
+                    else await UIManager.renderParticipantDashboard();
                 });
             }
             
@@ -3375,28 +3381,28 @@
             
             const navMyQuizzes = document.getElementById('nav-my-quizzes');
             if (navMyQuizzes) {
-                navMyQuizzes.addEventListener('click', (e) => {
+                navMyQuizzes.addEventListener('click', async (e) => {
                     e.preventDefault();
                     UIManager.showPage('dashboard-page');
-                    UIManager.renderSetterDashboard();
+                    await UIManager.renderSetterDashboard();
                 });
             }
             
             const navAvailableQuizzes = document.getElementById('nav-available-quizzes');
             if (navAvailableQuizzes) {
-                navAvailableQuizzes.addEventListener('click', (e) => {
+                navAvailableQuizzes.addEventListener('click', async (e) => {
                     e.preventDefault();
                     UIManager.showPage('dashboard-page');
-                    UIManager.renderParticipantDashboard();
+                    await UIManager.renderParticipantDashboard();
                 });
             }
             
             const navAdmin = document.getElementById('nav-admin');
             if (navAdmin) {
-                navAdmin.addEventListener('click', (e) => {
+                navAdmin.addEventListener('click', async (e) => {
                     e.preventDefault();
                     UIManager.showPage('admin-page');
-                    UIManager.initializeAdminPage();
+                    await UIManager.initializeAdminPage();
                 });
             }
             
@@ -3557,7 +3563,7 @@
             // === QUIZ FORM SUBMISSION (NOW ASYNC) ===
             const quizForm = document.getElementById('quiz-form');
             if (quizForm) {
-                quizForm.addEventListener('submit', async function(e) { // <-- ASYNC
+                quizForm.addEventListener('submit', async function(e) {
                     e.preventDefault();
                     
                     const quizData = {
@@ -3599,13 +3605,12 @@
                         return;
                     }
                     
-                    // Call the new async QuizManager function
                     const newQuiz = await QuizManager.createQuiz(quizData, questions, user.id);
                     
                     if (newQuiz) {
                         Toast.show('Quiz created successfully!', 'success');
                         UIManager.showPage('dashboard-page');
-                        UIManager.renderSetterDashboard(); // Re-render the dashboard
+                        await UIManager.renderSetterDashboard(); // Re-render the dashboard
                         quizForm.reset(); 
                         document.getElementById('questions-container').innerHTML = '';
                     } else {
@@ -3641,21 +3646,21 @@
             // Back to dashboard from results
             const backToDashboardBtn = document.getElementById('back-to-dashboard');
             if (backToDashboardBtn) {
-                backToDashboardBtn.addEventListener('click', () => {
+                backToDashboardBtn.addEventListener('click', async () => {
                     UIManager.showPage('dashboard-page');
                     const user = DataStorage.getCurrentUser();
-                    if (user.role === 'admin') UIManager.renderAdminDashboard();
-                    else if (user.role === 'setter') UIManager.renderSetterDashboard();
-                    else UIManager.renderParticipantDashboard();
+                    if (user.role === 'admin') await UIManager.renderAdminDashboard();
+                    else if (user.role === 'setter') await UIManager.renderSetterDashboard();
+                    else await UIManager.renderParticipantDashboard();
                 });
             }
             
             // Back to dashboard from setter results
             const backToDashboardSetterBtn = document.getElementById('back-to-dashboard-setter');
             if (backToDashboardSetterBtn) {
-                backToDashboardSetterBtn.addEventListener('click', () => {
+                backToDashboardSetterBtn.addEventListener('click', async () => {
                     UIManager.showPage('dashboard-page');
-                    UIManager.renderSetterDashboard();
+                    await UIManager.renderSetterDashboard();
                 });
             }
             
@@ -3676,8 +3681,8 @@
                     if (result.success) {
                         Toast.show('User created successfully', 'success');
                         createUserForm.reset();
-                        UIManager.loadUsersTable();
-                        UIManager.loadStudentsForAssignment();
+                        await UIManager.loadUsersTable();
+                        await UIManager.loadStudentsForAssignment();
                     } else {
                         Toast.show(result.message, 'error');
                     }
@@ -3687,7 +3692,7 @@
             // === ADMIN QUIZ ASSIGNMENT (NOW ASYNC) ===
             const assignQuizForm = document.getElementById('assign-quiz-form');
             if (assignQuizForm) {
-                assignQuizForm.addEventListener('submit', async function(e) { // <-- ASYNC
+                assignQuizForm.addEventListener('submit', async function(e) {
                     e.preventDefault();
                     const quizId = document.getElementById('assign-quiz')?.value;
                     const studentIds = Array.from(document.getElementById('assign-students')?.selectedOptions || []).map(option => option.value);
@@ -3703,7 +3708,7 @@
                     if (result.success) {
                         Toast.show('Quiz assigned successfully', 'success');
                         assignQuizForm.reset();
-                        UIManager.loadAssignmentsTable();
+                        await UIManager.loadAssignmentsTable();
                     } else {
                         Toast.show('Failed to assign quiz', 'error');
                     }
