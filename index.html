@@ -1776,14 +1776,17 @@
 
     <script>
         // === INITIALIZE SUPABASE ===
-const SUPABASE_URL = 'https://ibjnbrnptoapghpdfmih.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imliam5icm5wdG9hcGdocGRmbWloIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE5NDA3NzgsImV4cCI6MjA3NzUxNjc3OH0.7HfopF3YmOxJppkcCdlnmlsPzJWDtIemJAMpXeiyLSQ';
-
-// 1. Get the 'createClient' function from the global 'supabase' object
-const { createClient } = supabase; 
-
-// 2. Now, create our client. We can safely name it 'supabase'.
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+        const SUPABASE_URL = 'https://ibjnbrnptoapghpdfmih.supabase.co';
+        const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imliam5icm5wdG9hcGdocGRmbWloIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE5NDA3NzgsImV4cCI6MjA3NzUxNjc3OH0.7HfopF3YmOxJppkcCdlnmlsPzJWDtIemJAMpXeiyLSQ';
+        
+        // 1. Destructure 'createClient' from the *global* 'supabase' object (from the CDN)
+        const { createClient } = supabase;
+        
+        // 2. Create our local client. We MUST name it something
+        //    DIFFERENT than 'supabase'. We will use 'supaClient'.
+        const supaClient = createClient(SUPABASE_URL, SUPABASE_KEY);
+        
+        // === END OF FIX ===
 
         // Helper function to escape HTML
         function escapeHtml(unsafe) {
@@ -1796,31 +1799,214 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
                 .replace(/'/g, "&#039;");
         }
 
-        
-        
+        // Data Storage Functions (NOW 100% POWERED BY SUPABASE)
+        // This class is now our single source of truth for all database operations.
+        class DataStorage {
+            
+            // === PROFILE / USER FUNCTIONS ===
+            static async getAllProfiles() {
+                const { data, error } = await supaClient.from('profiles').select('*');
+                if (error) {
+                    console.error('Error fetching profiles:', error.message);
+                    return [];
+                }
+                return data;
+            }
 
-        // Toast Notification System
-        class Toast {
-            static show(message, type = 'success') {
-                const toast = document.getElementById('toast');
-                const toastMessage = document.getElementById('toast-message');
+            static async getProfile(userId) {
+                const { data, error } = await supaClient
+                    .from('profiles')
+                    .select('username, role')
+                    .eq('id', userId)
+                    .single();
+                if (error) console.error('Error fetching profile:', error.message);
+                return data;
+            }
+
+            // === QUIZ FUNCTIONS ===
+            static async getQuizzes() {
+                // Fetch quizzes and the username of their creator
+                const { data, error } = await supaClient
+                    .from('quizzes')
+                    .select(`
+                        id,
+                        title,
+                        description,
+                        duration,
+                        created_by,
+                        profiles ( username ) 
+                    `);
+                if (error) {
+                    console.error('Error fetching quizzes:', error.message);
+                    return [];
+                }
+                return data;
+            }
+
+            static async getQuizzesByUser(userId) {
+                const { data, error } = await supaClient
+                    .from('quizzes')
+                    .select('*')
+                    .eq('created_by', userId);
+                if (error) {
+                    console.error('Error fetching user quizzes:', error.message);
+                    return [];
+                }
+                return data;
+            }
+            
+            static async getQuizById(quizId) {
+                // 1. Get the quiz details
+                const { data: quizData, error: quizError } = await supaClient
+                    .from('quizzes')
+                    .select('*')
+                    .eq('id', quizId)
+                    .single();
                 
-                if (!toast || !toastMessage) {
-                    console.error('Toast elements not found');
-                    return;
+                if (quizError) {
+                    console.error('Error fetching quiz:', quizError.message);
+                    return null;
+                }
+
+                // 2. Get the questions for that quiz
+                const { data: questionsData, error: questionsError } = await supaClient
+                    .from('questions')
+                    .select('*')
+                    .eq('quiz_id', quizId);
+
+                if (questionsError) {
+                    console.error('Error fetching questions:', questionsError.message);
+                    return null;
                 }
                 
-                toastMessage.textContent = message;
-                toast.className = `toast toast-${type}`;
-                toast.classList.add('show');
+                // 3. Combine them and return
+                return { ...quizData, questions: questionsData };
+            }
+
+            static async createQuiz(quizData, questions) {
+                // 1. Insert the main quiz record
+                const { data: newQuiz, error: quizError } = await supaClient
+                    .from('quizzes')
+                    .insert(quizData)
+                    .select() // This returns the new row, including its ID
+                    .single();
+
+                if (quizError) {
+                    console.error('Error creating quiz:', quizError.message);
+                    return null;
+                }
+
+                // 2. Add the quiz_id to all questions
+                const questionsWithQuizId = questions.map(q => ({
+                    ...q,
+                    quiz_id: newQuiz.id 
+                }));
+
+                // 3. Insert all the questions
+                const { error: questionsError } = await supaClient
+                    .from('questions')
+                    .insert(questionsWithQuizId);
+
+                if (questionsError) {
+                    console.error('Error saving questions:', questionsError.message);
+                    // This is not ideal, as the quiz was created. A transaction would be better.
+                    // But for this app, we'll just log the error.
+                }
+
+                return newQuiz;
+            }
+
+            static async deleteQuiz(quizId) {
+                // The 'ON DELETE CASCADE' in our SQL will automatically
+                // delete all questions, results, and assignments for this quiz.
+                const { error } = await supaClient
+                    .from('quizzes')
+                    .delete()
+                    .eq('id', quizId);
                 
-                setTimeout(() => {
-                    toast.classList.remove('show');
-                }, 3000);
+                if (error) {
+                    console.error('Error deleting quiz:', error.message);
+                    return { success: false, message: error.message };
+                }
+                return { success: true };
+            }
+
+            // === RESULTS FUNCTIONS ===
+            static async getResultsByParticipant(participantId) {
+                const { data, error } = await supaClient
+                    .from('results')
+                    .select('*')
+                    .eq('participant_id', participantId);
+                if (error) console.error('Error fetching user results:', error.message);
+                return data || [];
+            }
+            
+            static async getResultsByQuiz(quizId) {
+                const { data, error } = await supaClient
+                    .from('results')
+                    .select('*, profiles ( username )') // Also get the username
+                    .eq('quiz_id', quizId);
+                if (error) console.error('Error fetching quiz results:', error.message);
+                return data || [];
+            }
+            
+            static async getAllResults() {
+                const { data, error } = await supaClient
+                    .from('results')
+                    .select('*, profiles ( username ), quizzes ( title )'); // Get all related info
+                if (error) console.error('Error fetching all results:', error.message);
+                return data || [];
+            }
+            
+            static async submitQuizResult(resultData) {
+                 const { data, error } = await supaClient
+                    .from('results')
+                    .insert(resultData)
+                    .select()
+                    .single();
+                
+                if (error) console.error('Error submitting result:', error.message);
+                return { data, error };
+            }
+
+            // === ASSIGNMENT FUNCTIONS ===
+            static async createAssignment(assignmentData) {
+                const { data, error } = await supaClient
+                    .from('assignments')
+                    .insert(assignmentData);
+
+                if (error) {
+                    console.error('Error creating assignment:', error.message);
+                    return { success: false, message: error.message };
+                }
+                return { success: true, data };
+            }
+
+            static async getAssignments() {
+                const { data, error } = await supaClient
+                    .from('assignments')
+                    .select('*, quizzes ( title )'); // Get the quiz title
+                
+                if (error) console.error('Error fetching assignments:', error.message);
+                return data || [];
+            }
+
+            // === LOCAL STORAGE HELPERS (for non-database things) ===
+            // We still use this for the logged-in user object and theme
+            
+            static setCurrentUser(user) {
+                localStorage.setItem('currentUser', JSON.stringify(user));
+            }
+            
+            static getCurrentUser() {
+                return JSON.parse(localStorage.getItem('currentUser'));
+            }
+
+            static clearCurrentUser() {
+                localStorage.removeItem('currentUser');
             }
         }
 
-        // Authentication Functions
         // Authentication Functions (NOW POWERED BY SUPABASE)
         class AuthManager {
             
@@ -1829,7 +2015,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
              */
             static async signUp(username, email, password, role) {
                 // This first part signs the user up in Supabase's "auth" system
-                const { data, error } = await supabase.auth.signUp({
+                const { data, error } = await supaClient.auth.signUp({
                     email: email,
                     password: password,
                     options: {
@@ -1847,10 +2033,6 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
                     return { success: false, message: error.message };
                 }
                 
-                // Note: By default, Supabase sends a confirmation email.
-                // For testing, you can turn this off in Supabase:
-                // Go to: Authentication -> Providers -> Email -> Turn off "Confirm email"
-                
                 return { success: true, user: data.user };
             }
             
@@ -1858,7 +2040,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
              * Logs in an existing user with Supabase Auth.
              */
             static async signIn(email, password) {
-                const { data, error } = await supabase.auth.signInWithPassword({
+                const { data, error } = await supaClient.auth.signInWithPassword({
                     email: email,
                     password: password,
                 });
@@ -1894,7 +2076,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
              * Logs the user out of Supabase.
              */
             static async signOut() {
-                const { error } = await supabase.auth.signOut();
+                const { error } = await supaClient.auth.signOut();
                 if (error) {
                     console.error('Sign out error:', error.message);
                 }
@@ -1906,7 +2088,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
              * Checks if there's an active session.
              */
             static async getCurrentUserSession() {
-                 const { data: { session }, error } = await supabase.auth.getSession();
+                 const { data: { session }, error } = await supaClient.auth.getSession();
                  if (error) {
                      console.error('Error getting session:', error.message);
                      return null;
@@ -1918,7 +2100,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
              * Gets a user's public profile (username, role) from our 'profiles' table.
              */
             static async getUserProfile(userId) {
-                const { data, error } = await supabase
+                const { data, error } = await supaClient
                     .from('profiles')      // From our 'profiles' table
                     .select('username, role') // Get these columns
                     .eq('id', userId)    // Where the 'id' matches
@@ -1929,214 +2111,6 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
                     return null;
                 }
                 return data;
-            }
-        }
-
-        // Data Storage Functions (NOW 100% POWERED BY SUPABASE)
-        // This class is now our single source of truth for all database operations.
-        class DataStorage {
-            
-            // === PROFILE / USER FUNCTIONS ===
-            static async getAllProfiles() {
-                const { data, error } = await supabase.from('profiles').select('*');
-                if (error) {
-                    console.error('Error fetching profiles:', error.message);
-                    return [];
-                }
-                return data;
-            }
-
-            static async getProfile(userId) {
-                const { data, error } = await supabase
-                    .from('profiles')
-                    .select('username, role')
-                    .eq('id', userId)
-                    .single();
-                if (error) console.error('Error fetching profile:', error.message);
-                return data;
-            }
-
-            // === QUIZ FUNCTIONS ===
-            static async getQuizzes() {
-                // Fetch quizzes and the username of their creator
-                const { data, error } = await supabase
-                    .from('quizzes')
-                    .select(`
-                        id,
-                        title,
-                        description,
-                        duration,
-                        created_by,
-                        profiles ( username ) 
-                    `);
-                if (error) {
-                    console.error('Error fetching quizzes:', error.message);
-                    return [];
-                }
-                return data;
-            }
-
-            static async getQuizzesByUser(userId) {
-                const { data, error } = await supabase
-                    .from('quizzes')
-                    .select('*')
-                    .eq('created_by', userId);
-                if (error) {
-                    console.error('Error fetching user quizzes:', error.message);
-                    return [];
-                }
-                return data;
-            }
-            
-            static async getQuizById(quizId) {
-                // 1. Get the quiz details
-                const { data: quizData, error: quizError } = await supabase
-                    .from('quizzes')
-                    .select('*')
-                    .eq('id', quizId)
-                    .single();
-                
-                if (quizError) {
-                    console.error('Error fetching quiz:', quizError.message);
-                    return null;
-                }
-
-                // 2. Get the questions for that quiz
-                const { data: questionsData, error: questionsError } = await supabase
-                    .from('questions')
-                    .select('*')
-                    .eq('quiz_id', quizId);
-
-                if (questionsError) {
-                    console.error('Error fetching questions:', questionsError.message);
-                    return null;
-                }
-                
-                // 3. Combine them and return
-                return { ...quizData, questions: questionsData };
-            }
-
-            static async createQuiz(quizData, questions) {
-                // 1. Insert the main quiz record
-                const { data: newQuiz, error: quizError } = await supabase
-                    .from('quizzes')
-                    .insert(quizData)
-                    .select() // This returns the new row, including its ID
-                    .single();
-
-                if (quizError) {
-                    console.error('Error creating quiz:', quizError.message);
-                    return null;
-                }
-
-                // 2. Add the quiz_id to all questions
-                const questionsWithQuizId = questions.map(q => ({
-                    ...q,
-                    quiz_id: newQuiz.id 
-                }));
-
-                // 3. Insert all the questions
-                const { error: questionsError } = await supabase
-                    .from('questions')
-                    .insert(questionsWithQuizId);
-
-                if (questionsError) {
-                    console.error('Error saving questions:', questionsError.message);
-                    // This is not ideal, as the quiz was created. A transaction would be better.
-                    // But for this app, we'll just log the error.
-                }
-
-                return newQuiz;
-            }
-
-            static async deleteQuiz(quizId) {
-                // The 'ON DELETE CASCADE' in our SQL will automatically
-                // delete all questions, results, and assignments for this quiz.
-                const { error } = await supabase
-                    .from('quizzes')
-                    .delete()
-                    .eq('id', quizId);
-                
-                if (error) {
-                    console.error('Error deleting quiz:', error.message);
-                    return { success: false, message: error.message };
-                }
-                return { success: true };
-            }
-
-            // === RESULTS FUNCTIONS ===
-            static async getResultsByParticipant(participantId) {
-                const { data, error } = await supabase
-                    .from('results')
-                    .select('*')
-                    .eq('participant_id', participantId);
-                if (error) console.error('Error fetching user results:', error.message);
-                return data || [];
-            }
-            
-            static async getResultsByQuiz(quizId) {
-                const { data, error } = await supabase
-                    .from('results')
-                    .select('*, profiles ( username )') // Also get the username
-                    .eq('quiz_id', quizId);
-                if (error) console.error('Error fetching quiz results:', error.message);
-                return data || [];
-            }
-            
-            static async getAllResults() {
-                const { data, error } = await supabase
-                    .from('results')
-                    .select('*, profiles ( username ), quizzes ( title )'); // Get all related info
-                if (error) console.error('Error fetching all results:', error.message);
-                return data || [];
-            }
-            
-            static async submitQuizResult(resultData) {
-                 const { data, error } = await supabase
-                    .from('results')
-                    .insert(resultData)
-                    .select()
-                    .single();
-                
-                if (error) console.error('Error submitting result:', error.message);
-                return { data, error };
-            }
-
-            // === ASSIGNMENT FUNCTIONS ===
-            static async createAssignment(assignmentData) {
-                const { data, error } = await supabase
-                    .from('assignments')
-                    .insert(assignmentData);
-
-                if (error) {
-                    console.error('Error creating assignment:', error.message);
-                    return { success: false, message: error.message };
-                }
-                return { success: true, data };
-            }
-
-            static async getAssignments() {
-                const { data, error } = await supabase
-                    .from('assignments')
-                    .select('*, quizzes ( title )'); // Get the quiz title
-                
-                if (error) console.error('Error fetching assignments:', error.message);
-                return data || [];
-            }
-
-            // === LOCAL STORAGE HELPERS (for non-database things) ===
-            // We still use this for the logged-in user object and theme
-            
-            static setCurrentUser(user) {
-                localStorage.setItem('currentUser', JSON.stringify(user));
-            }
-            
-            static getCurrentUser() {
-                return JSON.parse(localStorage.getItem('currentUser'));
-            }
-
-            static clearCurrentUser() {
-                localStorage.removeItem('currentUser');
             }
         }
 
@@ -2264,7 +2238,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
                 // For this project, we'll just delete their *profile*
                 // Note: This won't delete their login, but will break their app access
                 console.warn("Deleting user profile. Auth user still exists.");
-                const { error } = await supabase
+                const { error } = await supaClient
                     .from('profiles')
                     .delete()
                     .eq('id', userId);
@@ -2295,99 +2269,6 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
             }
         }
 
-        // This is now a real parser for .txt files
-        class FileParser {
-            static parseFile(file) {
-                return new Promise((resolve, reject) => {
-                    // 1. Check file type (Client-side check)
-                    if (file.type !== 'text/plain') {
-                        reject(new Error('Unsupported file type. Please upload a .txt file.'));
-                        return;
-                    }
-                    if (!file) {
-                        reject(new Error('No file provided.'));
-                        return;
-                    }
-
-                    const reader = new FileReader();
-
-                    // 2. Set up the onload event
-                    reader.onload = (event) => {
-                        try {
-                            const text = event.target.result;
-                            if (!text || text.trim() === '') {
-                                throw new Error('File is empty.');
-                            }
-                            
-                            const questions = [];
-                            // Split by one or more blank lines (more robust)
-                            const questionBlocks = text.trim().split(/\n\s*\n/);
-
-                            for (const block of questionBlocks) {
-                                const lines = block.trim().split('\n');
-                                if (lines.length < 2) continue; // Not a valid question (needs question + at least one option)
-
-                                const questionText = lines[0].trim();
-                                const options = [];
-                                let correctAnswer = -1;
-
-                                for (let i = 1; i < lines.length; i++) {
-                                    let line = lines[i].trim();
-                                    
-                                    if (line.startsWith('*')) {
-                                        correctAnswer = options.length; // This is the correct answer's index (0, 1, 2...)
-                                        line = line.substring(1).trim(); // Remove the '*'
-                                    }
-
-                                    // Also strip any leading '-'
-                                    if (line.startsWith('-')) {
-                                        line = line.substring(1).trim();
-                                    }
-                                    
-                                    if(line) { // Only add non-empty option lines
-                                        options.push(line);
-                                    }
-                                }
-
-                                // Validate the parsed question
-                                if (questionText && options.length >= 2 && correctAnswer !== -1) {
-                                    questions.push({
-                                        questionText: questionText,
-                                        options: options,
-                                        correctAnswer: correctAnswer,
-                                        points: 1
-                                    });
-                                } else {
-                                    console.warn("Skipping malformed question block (check for *, options, and text):", block);
-                                }
-                            }
-
-                            if (questions.length === 0) {
-                                throw new Error('No valid questions found. Check the file format guide.');
-                            }
-
-                            // 4. Resolve the promise
-                            resolve(questions);
-
-                        } catch (parseError) {
-                            console.error('Parsing error:', parseError);
-                            reject(new Error('Failed to parse file: ' + parseError.message));
-                        }
-                    };
-
-                    // 3. Set up the onerror event
-                    reader.onerror = (event) => {
-                        reject(new Error('Error reading file.'));
-                    };
-
-                    // 4. Start reading
-                    reader.readAsText(file);
-                });
-            }
-        }
-
-
-        // UI Manager
         // UI Manager (NOW FULLY ASYNCHRONOUS)
         class UIManager {
             static showPage(pageId) {
@@ -2425,7 +2306,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
                 } else if (userDisplay) {
                     userDisplay.textContent = 'Guest';
                     if (logoutBtn) logoutBtn.style.display = 'none';
-                    if (themeToggle) themeToggle.style.display = 'none';
+                    if (themeToggle) themeToggle.style.display = 'none'; // Hide theme toggle
                 }
             }
             
@@ -2734,7 +2615,8 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
                 
                 document.querySelectorAll('.view-my-result').forEach(button => {
                     button.addEventListener('click', function() {
-                        UIManager.showParticipantResult(quiz.id, user.id);
+                        const quizId = this.dataset.quizId;
+                        UIManager.showParticipantResult(quizId, user.id);
                     });
                 });
             }
@@ -3205,8 +3087,6 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
             }
         }
 
-        // Initialize the application
-        // Initialize the application
         // Initialize the application
         document.addEventListener('DOMContentLoaded', async function() { 
             
