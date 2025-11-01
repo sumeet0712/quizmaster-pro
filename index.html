@@ -1776,9 +1776,15 @@
 
     <script>
         // === INITIALIZE SUPABASE ===
-    const SUPABASE_URL = 'https://ibjnbrnptoapghpdfmih.supabase.co';
-    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imliam5icm5wdG9hcGdocGRmbWloIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE5NDA3NzgsImV4cCI6MjA3NzUxNjc3OH0.7HfopF3YmOxJppkcCdlnmlsPzJWDtIemJAMpXeiyLSQ';
-    const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const SUPABASE_URL = 'https://ibjnbrnptoapghpdfmih.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imliam5icm5wdG9hcGdocGRmbWloIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE5NDA3NzgsImV4cCI6MjA3NzUxNjc3OH0.7HfopF3YmOxJppkcCdlnmlsPzJWDtIemJAMpXeiyLSQ';
+
+// 1. Get the 'createClient' function from the global 'supabase' object
+const { createClient } = supabase; 
+
+// 2. Now, create our client. We can safely name it 'supabase'.
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
         // Helper function to escape HTML
         function escapeHtml(unsafe) {
             if (typeof unsafe !== 'string') return unsafe;
